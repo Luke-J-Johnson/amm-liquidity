@@ -1,6 +1,6 @@
 import math
+import warnings
 import pandas as pd
-
 
 class ConcentratedLiquidity():
     """
@@ -97,7 +97,7 @@ class ConcentratedLiquidity():
             self.tick = self.sqrtPrice_to_tick(self.sqrtPrice)
 
 
-    def Mint(self, tickLower, tickUpper, amount, amount0, amount1, sender, blockNumber, transactionIndex, logIndex, transactionHash):
+    def Mint(self, tickLower, tickUpper, amount, amount0, amount1, sender, blockNumber, transactionIndex, logIndex, transactionHash, tokenId):
         """
         Parameters
         ----------
@@ -107,20 +107,20 @@ class ConcentratedLiquidity():
         """
 
         
-        mint_df = pd.DataFrame([['Mint', logIndex, blockNumber, transactionIndex, transactionHash, sender, amount, tickLower, tickUpper, amount0, amount1]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1'])
+        mint_df = pd.DataFrame([['Mint', logIndex, blockNumber, transactionIndex, transactionHash, sender, amount, tickLower, tickUpper, amount0, amount1, tokenId]], 
+                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
         
         self.mints = pd.concat([self.mints, mint_df])
 
         #TODO Add calc of portfolio amounts from current L and price, check if amounts are correct
         #Precision errors with bit math leave alot to be desired        
 
-        add_active_df = pd.DataFrame([[float(amount), float(amount), tickLower, tickUpper, sender,
+        add_active_df = pd.DataFrame([[tokenId, float(amount), float(amount), tickLower, tickUpper, sender,
                                float(amount0), float(amount1), float(amount0), float(amount1),
                                float(0),float(0),float(0),float(0),
                                logIndex, blockNumber, transactionIndex, transactionHash,
                                logIndex, blockNumber, transactionIndex, transactionHash, True]],
-                               columns = ['last_L', 'start_L', 'tickLower', 'tickUpper', 'owner', 'start_token0_holdings', 'start_token1_holdings',
+                               columns = ['tokenId', 'last_L', 'start_L', 'tickLower', 'tickUpper', 'owner', 'start_token0_holdings', 'start_token1_holdings',
                                             'last_token0_holdings', 'last_token1_holdings',
                                             'token0_fees_accrued', 'token1_fees_accrued',
                                             'token0_collected', 'token1_collected',
@@ -136,7 +136,7 @@ class ConcentratedLiquidity():
         self.liquidity = pos['last_L'].loc[(pos['tickLower'] <= current_tick)&(pos['tickUpper'] > current_tick)].sum()
 
         
-    def Burn(self, tickLower, tickUpper , amount, amount0, amount1, owner, blockNumber, transactionIndex, logIndex, transactionHash):
+    def Burn(self, tickLower, tickUpper , amount, amount0, amount1, owner, blockNumber, transactionIndex, logIndex, transactionHash, tokenId):
         """
         Parameters
         ----------
@@ -145,45 +145,29 @@ class ConcentratedLiquidity():
             Initialized sqrtPrice for the pool this input takes precident over sqrtPriceX96 and price
         """
 
-        burn_df = pd.DataFrame([['Burn', logIndex, blockNumber, transactionIndex, transactionHash, owner, amount, tickLower, tickUpper, amount0, amount1]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1'])
+        burn_df = pd.DataFrame([['Burn', logIndex, blockNumber, transactionIndex, transactionHash, owner, amount, tickLower, tickUpper, amount0, amount1, tokenId]], 
+                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
         
         self.burns = pd.concat([self.burns, burn_df])
         
         pos = self.positions
-        #check if len >1, otherwise burn liquidity in pool
-        bpos = pos.loc[(pos['tickLower'] == tickLower) & (pos['tickUpper'] == tickUpper)]
-        if len(bpos) > 1:
-            #TODO handle cases when bounds do not match
-            blpos = bpos.loc[bpos['last_L'] == amount]
-            if len(blpos) == 1:
-                i = blpos.index[0]
 
-            elif len(blpos) == 0:
-                raise BurnMintMatchError("Cannot match mints and burns because there is no L with same tick range")
-            
-            else:
-                raise BurnMintMatchError("Cannot match mints and burns more the one position with same L")
-            
-        elif len(bpos) == 0:
-                raise BurnMintMatchError("Cannot match mints and burns because there is no L with same tick range")
+        bpos = pos.loc[pos['tokenId'] == tokenId]
 
-        else:
-            i = bpos.index[0]
+        if len(bpos) != 1:
+            raise BurnMintMatchError(f"Cannot match burn with active position. There are {len(bpos)} positions that match the tokenId")
         
-        L_delta = bpos['last_L'].at[i]
+        pos['last_L'] = pos['last_L'].mask(pos['tokenId'] == tokenId, pos['last_L'] - amount)
+        pos['last_token1_holdings'] = pos['last_token0_holdings'].mask(pos['tokenId'] == tokenId, amount0)
+        pos['last_token1_holdings'] = pos['last_token1_holdings'].mask(pos['tokenId'] == tokenId, amount1)
 
-        pos['last_L'].iat[i] -= L_delta #Burn only removes liquidity, if not collected the amount wont change  
-        pos['last_token0_holdings'].iat[i]  = amount0
-        pos['last_token1_holdings'].iat[i]  = amount1
-
-    
         pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
         self.positions = pos.copy()
+
         return 
     
     
-    def Collect(self, tickLower, tickUpper, amount0, amount1, recipient, blockNumber, transactionIndex, logIndex, transactionHash):
+    def Collect(self, tickLower, tickUpper, amount0, amount1, recipient, blockNumber, transactionIndex, logIndex, transactionHash, tokenId):
         """
         Parameters
         ----------
@@ -192,42 +176,28 @@ class ConcentratedLiquidity():
             Initialized sqrtPrice for the pool this input takes precident over sqrtPriceX96 and price
         """
 
-        collect_df = pd.DataFrame([['Collect', logIndex, blockNumber, transactionIndex, transactionHash, recipient, tickLower, tickUpper, amount0, amount1]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'tickLower', 'tickUpper', 'amount0', 'amount1'])
+        collect_df = pd.DataFrame([['Collect', logIndex, blockNumber, transactionIndex, transactionHash, recipient, tickLower, tickUpper, amount0, amount1, tokenId]], 
+                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
         self.collects = pd.concat([self.collects, collect_df])
 
         pos = self.positions
-        cpos = pos.loc[(pos['tickLower'] == tickLower) & (pos['tickUpper'] == tickUpper)]
 
-        if len(cpos) > 1:
-            #TODO handle cases when bounds do not match
-            clpos = cpos.loc[(cpos['last_L'] == 0)&((cpos['last_token0_holdings'] > 0)|(cpos['last_token1_holdings'] > 0))] 
-            if len(clpos) == 1:
-                i = clpos.index[0]
-
-            elif len(clpos) == 0:
-                raise CollectMatchError("Cannot match mints and burns because there is no null L in same tick range")
-
-            else:
-                raise CollectMatchError("Cannot match mints and burns more the one position with same L")
-        else:
-            i = cpos.index[0]
-
-        pos['token0_collected'].at[i] += amount0
-        pos['token1_collected'].at[i] += amount1
-
-        token0_diff = (pos['last_token0_holdings'].iloc[i] + pos['token0_fees_accrued'].iloc[i]  - pos['token0_collected'].iloc[i])
-        token1_diff = (pos['last_token1_holdings'].iloc[i] + pos['token1_fees_accrued'].iloc[i]  - pos['token1_collected'].iloc[i])
-        if (token0_diff <= 0) & (token1_diff <= 0): #Should really be ==
-            pos['active'].at[i] = False
+        cpos = pos.loc[pos['tokenId'] == tokenId]
+        if len(cpos) != 1:
+            CollectMatchError(f"Cannot match Collect with active position. There are {len(cpos)} positions that match the tokenId") 
         
+        pos['token0_collected'] = pos['token0_collected'].mask(pos['tokenId'] == tokenId, pos['token0_collected'] + amount0)
+        pos['token1_collected'] = pos['token1_collected'].mask(pos['tokenId'] == tokenId, pos['token1_collected'] + amount1)
+
+        pos['active'] = pos['active'].mask(((pos['last_token0_holdings'] + pos['token0_fees_accrued']  - pos['token0_collected']) + (pos['last_token1_holdings'] + pos['token1_fees_accrued']  - pos['token1_collected'])) == 0, False)
+
         pos[['last_token0_holdings', 'last_token1_holdings']] = pos.apply(lambda x: self.get_amounts(self.sqrtPrice, self.tick_to_sqrtPrice(x.tickLower), self.tick_to_sqrtPrice(x.tickUpper), x.last_L), axis = 1, result_type='expand')
         pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
         self.positions = pos.copy()
         
         return
     
-    def Swap(self, amount0, amount1,  sender, recipient, logIndex, blockNumber, transactionIndex, transactionHash, tick = None, liquidity = None):
+    def Swap(self, amount0, amount1,  sender, recipient, logIndex, blockNumber, transactionIndex, transactionHash, tick = None, liquidity = None, tolerance = 0.01):
         """
         Parameters
         ----------
@@ -357,8 +327,19 @@ class ConcentratedLiquidity():
             self.liquidity = L
 
         else:
-            if (L != liquidity) or (int(tick) != int(tick_next)):
-                raise SwapAllignmentError(f"Swap: tick or liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {liquidity}\n\ttick: {int(tick)}, {int(tick_next)}")
+            if int(tick) != int(tick_next): #warn if tick is not equal
+                if not (math.ceil(tick+(tolerance*100)) >= tick_next) and (math.floor(tick-(tolerance*100)) <= tick_next): #ticks are in bips for tolerance
+                    raise SwapAllignmentError(f"Swap: tick provided does not match calculations\n\n\ttick: {int(tick)}, {int(tick_next)}")
+                    
+                else:
+                    warnings.warn(f"Swap: tick provided does not match calculations\n\n\ttick: {int(tick)}, {int(tick_next)}")
+
+            elif L != liquidity : #warn if liquidity is not equal
+                if not (liquidity*(1+tolerance) >= L) and (liquidity*(1-tolerance) <= L):
+                    f"Swap: liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {liquidity}"
+                else:
+                    warnings.warn(f"Swap: liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {liquidity}")
+
             else:
                 self.sqrtPrice = sqrtPrice_next
                 self.tick = tick_next
@@ -472,13 +453,13 @@ class ConcentratedLiquidity():
     
     def replay_from_logs_for_LP_profit(self, df):
         #TODO add frequency need timestamp
-        tdf = df.loc[df['event'] == 'Initialize']
-        self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'].iloc[0], 
-                        tick = tdf['args.tick'].iloc[0])
-
         pos_dfs = []
         for i in range(len(df)):
             tdf = df.iloc[i]
+
+            if tdf['event'] == 'Initialize':
+                self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'], 
+                            tick = tdf['args.tick'])
 
             if tdf['event'] == 'Swap':
                 self.Swap(blockNumber = tdf['blockNumber'],
@@ -502,9 +483,9 @@ class ConcentratedLiquidity():
                             blockNumber = tdf['blockNumber'], 
                             transactionIndex = tdf['transactionIndex'], 
                             logIndex = tdf['logIndex'], 
-                            transactionHash = tdf['transactionHash'])
+                            transactionHash = tdf['transactionHash'],
+                            tokenId = tdf['tokenId'],)
                 
-
             if tdf['event'] == 'Burn':
                 self.Burn(tickLower = tdf['args.tickLower'], 
                         tickUpper = tdf['args.tickUpper'], 
@@ -515,7 +496,8 @@ class ConcentratedLiquidity():
                         blockNumber = tdf['blockNumber'], 
                         transactionIndex = tdf['transactionIndex'], 
                         logIndex = tdf['logIndex'], 
-                        transactionHash = tdf['transactionHash'])
+                        transactionHash = tdf['transactionHash'],
+                        tokenId = tdf['tokenId'],)
 
             if tdf['event'] == 'Mint':
                 self.Mint(tickLower = tdf['args.tickLower'], 
@@ -527,22 +509,24 @@ class ConcentratedLiquidity():
                         blockNumber = tdf['blockNumber'], 
                         transactionIndex = tdf['transactionIndex'], 
                         logIndex = tdf['logIndex'], 
-                        transactionHash = tdf['transactionHash'])
+                        transactionHash = tdf['transactionHash'],
+                        tokenId = tdf['tokenId'],)
             
             pos_dfs.append(self.positions)
-        
+
         position_df = pd.concat(pos_dfs)
         position_df.drop_duplicates(subset=['last_L', 'start_L', 'tickLower', 'tickUpper', 'owner',
-       'start_token0_holdings', 'start_token1_holdings',
-       'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
-       'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 'start_blockNumber', 'start_transactionIndex',
-       'start_transactionHash',], keep = 'first', inplace = True)
+        'start_token0_holdings', 'start_token1_holdings',
+        'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
+        'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 'start_blockNumber', 'start_transactionIndex',
+        'start_transactionHash',], keep = 'first', inplace = True)
         return position_df
     
-    def replay_from_CCData_for_LP_profit(self, ts_from, ts_to, CCAPI):
-        #TODO add functionality to get the data from CCdata and return the positions df
-        position_df = pd.DataFrame()
-        return position_df
+    def get_liquidity_distribution(self):
+        #TODO add function to view the liquidity distribution
+
+        liquidity_dist = pd.DataFrame()
+        return liquidity_dist
 
 
 
