@@ -40,7 +40,12 @@ class ConcentratedLiquidity():
         self.fee = fee*10**-6 #fee adjustment to get to a percentage fee
         self.tickSpacing = tickSpacing
         self.protocol_fee = protocol_fee*10**-6 #fee adjustment to get to a percentage fee
-        self.positions = pd.DataFrame()
+        self.positions = pd.DataFrame(columns = ['tokenId', 'last_L', 'start_L', 'tickLower', 'tickUpper', 'owner', 'start_token0_holdings', 'start_token1_holdings',
+                                                'last_token0_holdings', 'last_token1_holdings',
+                                                'token0_fees_accrued', 'token1_fees_accrued',
+                                                'token0_collected', 'token1_collected',
+                                                'start_logIndex', 'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 
+                                                'last_logIndex', 'last_blockNumber', 'last_transactionIndex', 'last_transactionHash', 'active'])
         self.mints = pd.DataFrame()
         self.burns = pd.DataFrame()
         self.collects = pd.DataFrame()
@@ -112,23 +117,32 @@ class ConcentratedLiquidity():
         
         self.mints = pd.concat([self.mints, mint_df])
 
+        pos = self.positions
         #TODO Add calc of portfolio amounts from current L and price, check if amounts are correct
         #Precision errors with bit math leave alot to be desired        
 
-        add_active_df = pd.DataFrame([[tokenId, float(amount), float(amount), tickLower, tickUpper, sender,
-                               float(amount0), float(amount1), float(amount0), float(amount1),
-                               float(0),float(0),float(0),float(0),
-                               logIndex, blockNumber, transactionIndex, transactionHash,
-                               logIndex, blockNumber, transactionIndex, transactionHash, True]],
-                               columns = ['tokenId', 'last_L', 'start_L', 'tickLower', 'tickUpper', 'owner', 'start_token0_holdings', 'start_token1_holdings',
-                                            'last_token0_holdings', 'last_token1_holdings',
-                                            'token0_fees_accrued', 'token1_fees_accrued',
-                                            'token0_collected', 'token1_collected',
-                                            'start_logIndex', 'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 
-                                            'last_logIndex', 'last_blockNumber', 'last_transactionIndex', 'last_transactionHash', 'active'])
+        if tokenId in list(pos['tokenId']):
+            raise
+            pos['last_L'] = pos['last_L'].mask(pos['tokenId'] == tokenId, pos['last_L'] + amount)
+            pos['last_token0_holdings'] = pos['last_token0_holdings'].mask(pos['tokenId'] == tokenId, pos['last_token0_holdings'] + amount0)
+            pos['last_token1_holdings'] = pos['last_token1_holdings'].mask(pos['tokenId'] == tokenId, pos['last_token1_holdings'] + amount1)
+            #FIXME Might need to add the start token for when a position is increased 
+            pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
 
-        
-        self.positions = pd.concat([self.positions, add_active_df]).reset_index(drop=True)
+        else:
+            add_active_df = pd.DataFrame([[tokenId, float(amount), float(amount), tickLower, tickUpper, sender,
+                                float(amount0), float(amount1), float(amount0), float(amount1),
+                                float(0),float(0),float(0),float(0),
+                                logIndex, blockNumber, transactionIndex, transactionHash,
+                                logIndex, blockNumber, transactionIndex, transactionHash, True]],
+                                columns = ['tokenId', 'last_L', 'start_L', 'tickLower', 'tickUpper', 'owner', 'start_token0_holdings', 'start_token1_holdings',
+                                                'last_token0_holdings', 'last_token1_holdings',
+                                                'token0_fees_accrued', 'token1_fees_accrued',
+                                                'token0_collected', 'token1_collected',
+                                                'start_logIndex', 'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 
+                                                'last_logIndex', 'last_blockNumber', 'last_transactionIndex', 'last_transactionHash', 'active'])
+
+            self.positions = pd.concat([pos, add_active_df]).reset_index(drop=True)
 
         #save intick liquidity
         pos = self.positions
@@ -158,7 +172,7 @@ class ConcentratedLiquidity():
             raise BurnMintMatchError(f"Cannot match burn with active position. There are {len(bpos)} positions that match the tokenId")
         
         pos['last_L'] = pos['last_L'].mask(pos['tokenId'] == tokenId, pos['last_L'] - amount)
-        pos['last_token1_holdings'] = pos['last_token0_holdings'].mask(pos['tokenId'] == tokenId, amount0)
+        pos['last_token0_holdings'] = pos['last_token0_holdings'].mask(pos['tokenId'] == tokenId, amount0)
         pos['last_token1_holdings'] = pos['last_token1_holdings'].mask(pos['tokenId'] == tokenId, amount1)
 
         pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
@@ -484,7 +498,7 @@ class ConcentratedLiquidity():
                             transactionIndex = tdf['transactionIndex'], 
                             logIndex = tdf['logIndex'], 
                             transactionHash = tdf['transactionHash'],
-                            tokenId = tdf['tokenId'],)
+                            tokenId = tdf['tokenId'])
                 
             if tdf['event'] == 'Burn':
                 self.Burn(tickLower = tdf['args.tickLower'], 
@@ -497,7 +511,7 @@ class ConcentratedLiquidity():
                         transactionIndex = tdf['transactionIndex'], 
                         logIndex = tdf['logIndex'], 
                         transactionHash = tdf['transactionHash'],
-                        tokenId = tdf['tokenId'],)
+                        tokenId = tdf['tokenId'])
 
             if tdf['event'] == 'Mint':
                 self.Mint(tickLower = tdf['args.tickLower'], 
@@ -510,16 +524,16 @@ class ConcentratedLiquidity():
                         transactionIndex = tdf['transactionIndex'], 
                         logIndex = tdf['logIndex'], 
                         transactionHash = tdf['transactionHash'],
-                        tokenId = tdf['tokenId'],)
+                        tokenId = tdf['tokenId'])
             
             pos_dfs.append(self.positions)
 
-        position_df = pd.concat(pos_dfs)
+        position_df = pd.concat(pos_dfs) #can save for different profit in state
         position_df.drop_duplicates(subset=['last_L', 'start_L', 'tickLower', 'tickUpper', 'owner',
-        'start_token0_holdings', 'start_token1_holdings',
-        'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
-        'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 'start_blockNumber', 'start_transactionIndex',
-        'start_transactionHash',], keep = 'first', inplace = True)
+                                            'start_token0_holdings', 'start_token1_holdings',
+                                            'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
+                                            'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 
+                                            'start_blockNumber', 'start_transactionIndex', 'start_transactionHash',], keep = 'first', inplace = True)
         return position_df
     
     def get_liquidity_distribution(self):
