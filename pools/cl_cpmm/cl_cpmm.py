@@ -58,6 +58,8 @@ class ConcentratedLiquidity():
         self.Q96 = 2**96
         self.sqrtPrice = None 
         self.sqrtPriceX96 = None
+        self.tick = None
+
 
     
     def Initialize(self, 
@@ -103,6 +105,7 @@ class ConcentratedLiquidity():
             if self.sqrtPrice_to_tick(self.sqrtPrice) != tick:
                 if warn:
                     TickPriceAllignmentError(f"Initialize: The price and tick supplied do not match\n\n\t{tick}, {self.sqrtPrice_to_tick(self.sqrtPrice)}")
+                    self.tick = tick
                 else:
                     raise TickPriceAllignmentError(f"Initialize: The price and tick supplied do not match\n\n\t{tick}, {self.sqrtPrice_to_tick(self.sqrtPrice)}")
             else:
@@ -986,7 +989,7 @@ class ConcentratedLiquidity():
             if tdf['event'] == 'Initialize':
                 if pass_error:
                     self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'], 
-                            tick = tdf['args.tick'], warn = False)
+                            tick = tdf['args.tick'], warn = True)
                 else:
                     self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'], 
                             tick = tdf['args.tick'])
