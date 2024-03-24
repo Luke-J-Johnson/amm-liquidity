@@ -40,7 +40,15 @@ class ConcentratedLiquidity():
         self.fee = fee*10**-6 #fee adjustment to get to a percentage fee
         self.tickSpacing = tickSpacing
         self.protocol_fee = protocol_fee*10**-6 #fee adjustment to get to a percentage fee
-        self.positions = pd.DataFrame()
+        self.positions = pd.DataFrame(columns = ['tokenId', 'last_L', 'start_L', 'increase_L', 
+                                                   'tickLower', 'tickUpper', 'owner', 
+                                                    'start_token0_holdings', 'start_token1_holdings',
+                                                    'increase_token0_holdings', 'increase_token1_holdings',
+                                                    'last_token0_holdings', 'last_token1_holdings',
+                                                    'token0_fees_accrued', 'token1_fees_accrued',
+                                                    'token0_collected', 'token1_collected',
+                                                    'start_logIndex', 'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 
+                                                    'last_logIndex', 'last_blockNumber', 'last_transactionIndex', 'last_transactionHash'])
         self.mints = pd.DataFrame()
         self.burns = pd.DataFrame()
         self.collects = pd.DataFrame()
@@ -95,6 +103,7 @@ class ConcentratedLiquidity():
                 self.tick = tick
         else:
             self.tick = self.sqrtPrice_to_tick(self.sqrtPrice)
+        return
 
 
     def Mint(self, tickLower, tickUpper, amount, amount0, amount1, sender, blockNumber, transactionIndex, logIndex, transactionHash, tokenId):
@@ -112,28 +121,48 @@ class ConcentratedLiquidity():
         
         self.mints = pd.concat([self.mints, mint_df])
 
+        pos = self.positions
         #TODO Add calc of portfolio amounts from current L and price, check if amounts are correct
         #Precision errors with bit math leave alot to be desired        
 
-        add_active_df = pd.DataFrame([[tokenId, float(amount), float(amount), tickLower, tickUpper, sender,
-                               float(amount0), float(amount1), float(amount0), float(amount1),
-                               float(0),float(0),float(0),float(0),
-                               logIndex, blockNumber, transactionIndex, transactionHash,
-                               logIndex, blockNumber, transactionIndex, transactionHash, True]],
-                               columns = ['tokenId', 'last_L', 'start_L', 'tickLower', 'tickUpper', 'owner', 'start_token0_holdings', 'start_token1_holdings',
-                                            'last_token0_holdings', 'last_token1_holdings',
-                                            'token0_fees_accrued', 'token1_fees_accrued',
-                                            'token0_collected', 'token1_collected',
-                                            'start_logIndex', 'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 
-                                            'last_logIndex', 'last_blockNumber', 'last_transactionIndex', 'last_transactionHash', 'active'])
+        if tokenId in list(pos['tokenId']):
+            pos['last_L'] = pos['last_L'].mask(pos['tokenId'] == tokenId, pos['last_L'] + amount)
+            pos['last_token0_holdings'] = pos['last_token0_holdings'].mask(pos['tokenId'] == tokenId, pos['last_token0_holdings'] + amount0)
+            pos['last_token1_holdings'] = pos['last_token1_holdings'].mask(pos['tokenId'] == tokenId, pos['last_token1_holdings'] + amount1)
+            pos['increase_L'] = pos['last_L'].mask(pos['tokenId'] == tokenId, pos['last_L'] + amount)
+            pos['increase_token0_holdings'] = pos['increase_token0_holdings'].mask(pos['tokenId'] == tokenId, pos['increase_token0_holdings'] + amount0)
+            pos['increase_token1_holdings'] = pos['increase_token1_holdings'].mask(pos['tokenId'] == tokenId, pos['increase_token1_holdings'] + amount1) #tracks when a mint is for the same position not driven by price changes
+            pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
+            self.positions = pos
 
-        
-        self.positions = pd.concat([self.positions, add_active_df]).reset_index(drop=True)
+        else:
+            add_active_df = pd.DataFrame([[tokenId, float(amount), float(amount), float(0), tickLower, tickUpper, sender,
+                                        float(amount0), float(amount1), 
+                                        float(0), float(0),
+                                        float(amount0), float(amount1),
+                                        float(0),float(0),float(0),float(0),
+                                        logIndex, blockNumber, transactionIndex, transactionHash,
+                                        logIndex, blockNumber, transactionIndex, transactionHash]],
+                                        columns = ['tokenId', 'last_L', 'start_L', 'increase_L', 
+                                                   'tickLower', 'tickUpper', 'owner', 
+                                                    'start_token0_holdings', 'start_token1_holdings',
+                                                    'increase_token0_holdings', 'increase_token1_holdings',
+                                                    'last_token0_holdings', 'last_token1_holdings',
+                                                    'token0_fees_accrued', 'token1_fees_accrued',
+                                                    'token0_collected', 'token1_collected',
+                                                    'start_logIndex', 'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 
+                                                    'last_logIndex', 'last_blockNumber', 'last_transactionIndex', 'last_transactionHash'])
+
+            if pos.empty:
+                self.positions = add_active_df
+            else:
+                self.positions = pd.concat([pos, add_active_df]).reset_index(drop=True)
 
         #save intick liquidity
         pos = self.positions
         current_tick = self.sqrtPrice_to_tick(self.sqrtPrice)
         self.liquidity = pos['last_L'].loc[(pos['tickLower'] <= current_tick)&(pos['tickUpper'] > current_tick)].sum()
+        return
 
         
     def Burn(self, tickLower, tickUpper , amount, amount0, amount1, owner, blockNumber, transactionIndex, logIndex, transactionHash, tokenId):
@@ -158,12 +187,15 @@ class ConcentratedLiquidity():
             raise BurnMintMatchError(f"Cannot match burn with active position. There are {len(bpos)} positions that match the tokenId")
         
         pos['last_L'] = pos['last_L'].mask(pos['tokenId'] == tokenId, pos['last_L'] - amount)
-        pos['last_token1_holdings'] = pos['last_token0_holdings'].mask(pos['tokenId'] == tokenId, amount0)
+        pos['last_token0_holdings'] = pos['last_token0_holdings'].mask(pos['tokenId'] == tokenId, amount0)
         pos['last_token1_holdings'] = pos['last_token1_holdings'].mask(pos['tokenId'] == tokenId, amount1)
-
         pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
-        self.positions = pos.copy()
 
+        if not pos.loc[pos['last_L'] < 0].empty:
+            warnings.warn(f"\nBurn event resulted in negative liquidity. Has been set to 0")
+            pos['last_L'] = pos['last_L'].mask(pos['last_L'] < 0, 0)
+
+        self.positions = pos.copy()
         return 
     
     
@@ -189,15 +221,12 @@ class ConcentratedLiquidity():
         pos['token0_collected'] = pos['token0_collected'].mask(pos['tokenId'] == tokenId, pos['token0_collected'] + amount0)
         pos['token1_collected'] = pos['token1_collected'].mask(pos['tokenId'] == tokenId, pos['token1_collected'] + amount1)
 
-        pos['active'] = pos['active'].mask(((pos['last_token0_holdings'] + pos['token0_fees_accrued']  - pos['token0_collected']) + (pos['last_token1_holdings'] + pos['token1_fees_accrued']  - pos['token1_collected'])) == 0, False)
-
         pos[['last_token0_holdings', 'last_token1_holdings']] = pos.apply(lambda x: self.get_amounts(self.sqrtPrice, self.tick_to_sqrtPrice(x.tickLower), self.tick_to_sqrtPrice(x.tickUpper), x.last_L), axis = 1, result_type='expand')
         pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
         self.positions = pos.copy()
-        
         return
     
-    def Swap(self, amount0, amount1,  sender, recipient, logIndex, blockNumber, transactionIndex, transactionHash, tick = None, liquidity = None, tolerance = 0.01):
+    def Swap(self, amount0, amount1,  sender, recipient, logIndex, blockNumber, transactionIndex, transactionHash, sqrtPriceX96 = None, tick = None, liquidity = None, warn_all = False, tolerance = 0.025, pass_error = False):
         """
         Parameters
         ----------
@@ -206,8 +235,8 @@ class ConcentratedLiquidity():
             Initialized sqrtPrice for the pool this input takes precident over sqrtPriceX96 and price
         """
 
-        swap_df = pd.DataFrame([['Swap', logIndex, blockNumber, transactionIndex, transactionHash, sender, recipient, amount0, amount1, tick, liquidity]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'recipient', 'amount0', 'amount1', 'tick', 'liquidity'])
+        swap_df = pd.DataFrame([['Swap', logIndex, blockNumber, transactionIndex, transactionHash, sender, recipient, amount0, amount1, sqrtPriceX96, tick, liquidity]], 
+                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'recipient', 'amount0', 'amount1', 'sqrtPriceX96', 'tick', 'liquidity'])
         
         self.swaps = pd.concat([self.swaps, swap_df])
 
@@ -230,15 +259,29 @@ class ConcentratedLiquidity():
             amount1_nf = amount1
 
         if zeroForOne == None:
-            raise SwapAmountError(f"\nSwap amounts are incorrect:\n\n\t{(amount0,amount1)}")
+            raise SwapAmountError(f"\nSwap amounts are incorrect:\n\n\t{(amount0, amount1)}\n")
 
         self.total_fee0 += total_fee0
         self.total_fee1 += total_fee1
 
         pos = self.positions
+        
+        #check that the active positions cover the current tick, otherwise move tick to the closest liquidity or down to lowest
+        active_pos = pos.loc[(pos['last_L'] > 0)]
+        lowest_tick = active_pos['tickLower'].min()
+        highest_tick = active_pos['tickUpper'].max()
+
+        if lowest_tick > self.tick:
+            self.tick = lowest_tick
+
+        if highest_tick < self.tick:
+            self.tick = highest_tick
+
         current_tick, current_tick_lower, current_tick_upper = self.get_tick_range(self.tick)
 
+
         if zeroForOne:
+            #print(f'{current_tick}, {current_tick_lower}')
             sqrtPrice = self.sqrtPrice 
             sqrtPriceA = self.tick_to_sqrtPrice(current_tick_lower) #based on lower tick not lower price
 
@@ -247,21 +290,32 @@ class ConcentratedLiquidity():
 
             fee0_collected = 0
             while amount0_a > 0:
-                active_pos = pos.loc[(pos['tickLower'] < current_tick)&(pos['tickUpper'] >= current_tick)]
-                L = active_pos['last_L'].sum()
+                active_pos = pos.loc[(pos['tickLower'] < current_tick)&(pos['tickUpper'] >= current_tick)&(pos['last_L'] > 0)]
+                
+                if active_pos.empty:
+                    if current_tick == pos['tickLower'].loc[(pos['last_L'] > 0)].min():
+                        active_pos = pos.loc[(pos['tickLower'] == current_tick)&(pos['last_L'] > 0)]
+                    elif current_tick < pos['tickLower'].loc[(pos['last_L'] > 0)].min(): 
+                        current_tick = pos['tickLower'].loc[(pos['last_L'] > 0)].min()
+                        current_tick_lower = current_tick - self.tickSpacing
+                        continue
+                    else:    
+                        current_tick = current_tick_lower
+                        current_tick_lower = current_tick - self.tickSpacing
+                        continue
 
+                L = active_pos['last_L'].sum()
+                
                 #check if there is enough reserves in the tick
                 if self.get_amount0(sqrtPrice, sqrtPriceA, L) > amount0_a:
                     sqrtPrice_next = self.get_next_sqrtPrice_from_inputs(sqrtPrice, L, amount0_a, zeroForOne=zeroForOne)
                     tick_next = self.sqrtPrice_to_tick(sqrtPrice_next)
-
                     fee0_in_range = round((amount0_a/(1-self.fee)) - amount0_a)
                     fee0_collected += fee0_in_range
                     fee0_per_L = fee0_in_range/L
 
-                    pos['token0_fees_accrued'] = pos['token0_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token0_fees_accrued'] + pos['last_L'] * fee0_per_L)
+                    pos['token0_fees_accrued'] = pos['token0_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token0_fees_accrued'] + (pos['last_L'] * fee0_per_L))
                     break
-
 
                 else:
                     amount0_diff = self.get_amount0(sqrtPrice, sqrtPriceA, L) 
@@ -270,16 +324,18 @@ class ConcentratedLiquidity():
                     fee0_in_range = round((amount0_diff/(1-self.fee)) - amount0_diff)
                     fee0_collected += fee0_in_range
                     fee0_per_L = fee0_in_range/L
-                    pos['token0_fees_accrued'] = pos['token0_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token0_fees_accrued'] + pos['last_L'] * fee0_per_L)
+                    pos['token0_fees_accrued'] = pos['token0_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token0_fees_accrued'] + (pos['last_L'] * fee0_per_L))
 
                     amount0_a -= amount0_diff
                     amount1_a -= amount1_diff
-                    current_tick = current_tick_lower
+
+                    current_tick = current_tick_lower 
                     current_tick_lower = current_tick - self.tickSpacing
                     sqrtPrice = self.tick_to_sqrtPrice(current_tick)
                     sqrtPriceA = self.tick_to_sqrtPrice(current_tick_lower)
 
         else:
+            #print(f'{current_tick}, {current_tick_upper}')
             sqrtPrice = self.sqrtPrice
             sqrtPriceB = self.tick_to_sqrtPrice(current_tick_upper) #based on upper tick not upper price
 
@@ -288,7 +344,33 @@ class ConcentratedLiquidity():
 
             fee1_collected = 0
             while amount1_a > 0:
-                active_pos = pos.loc[(pos['tickLower'] <= current_tick)&(pos['tickUpper'] > current_tick)]
+                active_pos = pos.loc[(pos['tickLower'] <= current_tick)&(pos['tickUpper'] > current_tick)&(pos['last_L'] > 0)]
+                
+                if active_pos.empty:
+                    if current_tick == pos['tickUpper'].loc[(pos['last_L'] > 0)].max():
+                        active_pos = pos.loc[(pos['tickUpper'] == current_tick)&(pos['last_L'] > 0)]
+
+                    elif current_tick > pos['tickUpper'].loc[(pos['last_L'] > 0)].max(): 
+                        current_tick = pos['tickUpper'].loc[(pos['last_L'] > 0)].max()
+                        current_tick_upper = current_tick + self.tickSpacing
+                        continue
+
+                    else:    
+                        current_tick = current_tick_upper
+                        current_tick_upper = current_tick + self.tickSpacing
+                        continue
+
+
+                if active_pos.empty: #if no liquidity, skip to next tick #current tick to next tick bound
+                    #check if there is any liquidity above
+                    if current_tick > pos['tickUpper'].loc[(pos['last_L'] > 0)].max():
+                        current_tick = pos['tickLower'].loc[(pos['last_L'] > 0)].max()
+                    else:    
+                        current_tick = current_tick_upper
+
+                    current_tick_upper = current_tick + self.tickSpacing
+                    continue
+
                 L = active_pos['last_L'].sum()
 
                 #check if there is enough reserves in the tick
@@ -300,7 +382,7 @@ class ConcentratedLiquidity():
                     fee1_collected += fee1_in_range
                     fee1_per_L = fee1_in_range/L
 
-                    pos['token1_fees_accrued'] = pos['token1_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token1_fees_accrued'] + pos['last_L'] * fee1_per_L)
+                    pos['token1_fees_accrued'] = pos['token1_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token1_fees_accrued'] + (pos['last_L'] * fee1_per_L))
                     break
 
                 else:
@@ -310,7 +392,7 @@ class ConcentratedLiquidity():
                     fee1_in_range = round((amount1_diff/(1-self.fee)) - amount1_diff)
                     fee1_collected += fee1_in_range
                     fee1_per_L = fee1_in_range/L
-                    pos['token1_fees_accrued'] = pos['token1_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token1_fees_accrued'] + pos['last_L'] * fee1_per_L)
+                    pos['token1_fees_accrued'] = pos['token1_fees_accrued'].mask(pos.index.isin(active_pos.index), pos['token1_fees_accrued'] + (pos['last_L'] * fee1_per_L))
 
                     amount0_a -= amount0_diff
                     amount1_a -= amount1_diff
@@ -321,29 +403,41 @@ class ConcentratedLiquidity():
                     sqrtPriceB = self.tick_to_sqrtPrice(current_tick_upper)
 
 
-        if not any([liquidity, tick]): #save if check not given
+        if not any([liquidity, tick, sqrtPriceX96]): #save if check not given
             self.sqrtPrice = sqrtPrice_next
             self.tick = tick_next
             self.liquidity = L
 
+        elif pass_error:
+            self.sqrtPrice = self.sqrtPriceX96_to_sqrtPrice(sqrtPriceX96)
+            self.tick = tick
+            self.liquidity = pos['last_L'].loc[(pos['tickLower'] < current_tick)&(pos['tickUpper'] >= current_tick)&(pos['last_L'] > 0)].sum()
+
         else:
-            if int(tick) != int(tick_next): #warn if tick is not equal
-                if not (math.ceil(tick+(tolerance*100)) >= tick_next) and (math.floor(tick-(tolerance*100)) <= tick_next): #ticks are in bips for tolerance
-                    raise SwapAllignmentError(f"Swap: tick provided does not match calculations\n\n\ttick: {int(tick)}, {int(tick_next)}")
-                    
-                else:
-                    warnings.warn(f"Swap: tick provided does not match calculations\n\n\ttick: {int(tick)}, {int(tick_next)}")
-
-            elif L != liquidity : #warn if liquidity is not equal
-                if not (liquidity*(1+tolerance) >= L) and (liquidity*(1-tolerance) <= L):
-                    f"Swap: liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {liquidity}"
-                else:
-                    warnings.warn(f"Swap: liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {liquidity}")
-
+            if warn_all:
+                if int(tick) != int(tick_next):
+                    warnings.warn(f"\n\nSwap: tick provided does not match calculations\n\n\ttick: {int(tick)}, {int(tick_next)}\n")
+                elif L != liquidity:
+                    warnings.warn(f"\n\nSwap: liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {int(liquidity)}\n")
+                
             else:
-                self.sqrtPrice = sqrtPrice_next
-                self.tick = tick_next
-                self.liquidity = L    
+                if int(tick) != int(tick_next):
+                    if not (math.ceil(tick+(tolerance*100)) >= tick_next) and (math.floor(tick-(tolerance*100)) <= tick_next): #ticks are in bips for tolerance
+                        raise SwapAllignmentError(f"\n\nSwap: tick provided does not match calculations\n\n\ttick: {int(tick)}, {int(tick_next)}\n")
+                    else: 
+                        warnings.warn(f"\n\nSwap: tick provided does not match calculations\n\n\ttick: {int(tick)}, {int(tick_next)}\n")
+
+                elif L != liquidity:
+                    if not (liquidity*(1+tolerance) >= L) and (liquidity*(1-tolerance) <= L):
+                        raise SwapAllignmentError(f"\n\nSwap: liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {int(liquidity)}\n")
+                    else: 
+                        warnings.warn(f"\n\nSwap: liquidity provided does not match calculations\n\n\tliquidity: {int(L)}, {int(liquidity)}\n")
+
+            #self.sqrtPrice = sqrtPrice_next 
+            #self.tick = tick_next
+            self.sqrtPrice = self.sqrtPriceX96_to_sqrtPrice(sqrtPriceX96) #use the supplied tick for next price to avoid carry forward errors
+            self.tick = tick
+            self.liquidity = L 
 
         #Update positions for estimate portfolio holdings 
         #It is an estimate due to precision errors but close enough for estimation of profit
@@ -355,7 +449,7 @@ class ConcentratedLiquidity():
     
     def get_active_LP_positions(self):
         positions = self.positions
-        return positions.loc[(positions['active'])&(positions['last_L'] > 0)]
+        return positions.loc[positions['last_L'] > 0]
     
     def view_all_pool_events(self):
         pool_events = pd.concat([self.mints, self.burns, self.collects, self.swaps])
@@ -369,6 +463,14 @@ class ConcentratedLiquidity():
     
     def sqrtPrice_to_tick(self, sqrtPrice):
         return math.floor(round(math.log(sqrtPrice, math.sqrt(1.0001)), 6)) #control for precision issues and tick int size with the rounding
+
+    def sqrtPrice_to_tick_rounding(self, sqrtPrice):
+        #solidity rounds towards 0
+        temp_tick = round(math.log(sqrtPrice, math.sqrt(1.0001)), 6) #control for precision issues and tick int size with the rounding
+        if temp_tick < 0:
+            return math.ceil(temp_tick)
+        else: 
+            return math.floor(temp_tick)
     
     def tick_to_sqrtPrice(self, tick):
         return float(1.0001 ** (tick / 2))
@@ -451,7 +553,7 @@ class ConcentratedLiquidity():
 
         return int(L)
     
-    def replay_from_logs_for_LP_profit(self, df):
+    def replay_from_logs_for_LP_profit(self, df, tolerance = 0.01, pass_error = False):
         #TODO add frequency need timestamp
         pos_dfs = []
         for i in range(len(df)):
@@ -461,17 +563,35 @@ class ConcentratedLiquidity():
                 self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'], 
                             tick = tdf['args.tick'])
 
-            if tdf['event'] == 'Swap':
-                self.Swap(blockNumber = tdf['blockNumber'],
-                        transactionIndex = tdf['transactionIndex'],
-                        logIndex = tdf['logIndex'],
-                        transactionHash = tdf['transactionHash'],
-                        sender = tdf['args.sender'],
-                        recipient = tdf['args.recipient'],
-                        amount0 = tdf['args.amount0'],
-                        amount1 = tdf['args.amount1'],
-                        tick = tdf['args.tick'],
-                        liquidity = tdf['args.liquidity'])
+            if pass_error:
+                if tdf['event'] == 'Swap':
+                    self.Swap(blockNumber = tdf['blockNumber'],
+                            transactionIndex = tdf['transactionIndex'],
+                            logIndex = tdf['logIndex'],
+                            transactionHash = tdf['transactionHash'],
+                            sender = tdf['args.sender'],
+                            recipient = tdf['args.recipient'],
+                            amount0 = tdf['args.amount0'],
+                            amount1 = tdf['args.amount1'],
+                            sqrtPriceX96 = tdf['args.sqrtPriceX96'],
+                            tick = tdf['args.tick'],
+                            liquidity = tdf['args.liquidity'],
+                            pass_error = pass_error,
+                            tolerance = tolerance)
+            else:
+                if tdf['event'] == 'Swap':
+                    self.Swap(blockNumber = tdf['blockNumber'],
+                            transactionIndex = tdf['transactionIndex'],
+                            logIndex = tdf['logIndex'],
+                            transactionHash = tdf['transactionHash'],
+                            sender = tdf['args.sender'],
+                            recipient = tdf['args.recipient'],
+                            amount0 = tdf['args.amount0'],
+                            amount1 = tdf['args.amount1'],
+                            sqrtPriceX96 = tdf['args.sqrtPriceX96'],
+                            tick = tdf['args.tick'],
+                            liquidity = tdf['args.liquidity'],
+                            tolerance=tolerance)
 
 
             if tdf['event'] == 'Collect':
@@ -484,7 +604,7 @@ class ConcentratedLiquidity():
                             transactionIndex = tdf['transactionIndex'], 
                             logIndex = tdf['logIndex'], 
                             transactionHash = tdf['transactionHash'],
-                            tokenId = tdf['tokenId'],)
+                            tokenId = tdf['tokenId'])
                 
             if tdf['event'] == 'Burn':
                 self.Burn(tickLower = tdf['args.tickLower'], 
@@ -497,7 +617,7 @@ class ConcentratedLiquidity():
                         transactionIndex = tdf['transactionIndex'], 
                         logIndex = tdf['logIndex'], 
                         transactionHash = tdf['transactionHash'],
-                        tokenId = tdf['tokenId'],)
+                        tokenId = tdf['tokenId'])
 
             if tdf['event'] == 'Mint':
                 self.Mint(tickLower = tdf['args.tickLower'], 
@@ -510,16 +630,17 @@ class ConcentratedLiquidity():
                         transactionIndex = tdf['transactionIndex'], 
                         logIndex = tdf['logIndex'], 
                         transactionHash = tdf['transactionHash'],
-                        tokenId = tdf['tokenId'],)
+                        tokenId = tdf['tokenId'])
             
-            pos_dfs.append(self.positions)
+            if not self.positions.empty:
+                pos_dfs.append(self.positions)
 
-        position_df = pd.concat(pos_dfs)
+        position_df = pd.concat(pos_dfs) #can save for different profit in state
         position_df.drop_duplicates(subset=['last_L', 'start_L', 'tickLower', 'tickUpper', 'owner',
-        'start_token0_holdings', 'start_token1_holdings',
-        'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
-        'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 'start_blockNumber', 'start_transactionIndex',
-        'start_transactionHash',], keep = 'first', inplace = True)
+                                            'start_token0_holdings', 'start_token1_holdings',
+                                            'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
+                                            'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 
+                                            'start_blockNumber', 'start_transactionIndex', 'start_transactionHash',], keep = 'first', inplace = True)
         return position_df
     
     def get_liquidity_distribution(self):
@@ -527,6 +648,16 @@ class ConcentratedLiquidity():
 
         liquidity_dist = pd.DataFrame()
         return liquidity_dist
+
+    def quote_price(self, amount, zeroForOne):
+        #TODO add function to view the liquidity distribution
+        price = 0
+        quotePrice = 0
+        amount0 = 0
+        amount1 = 0
+
+        
+        return price, quotePrice, amount0, amount1
 
 
 
