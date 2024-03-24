@@ -65,6 +65,7 @@ class ConcentratedLiquidity():
                    sqrtPriceX96 = None, 
                    price = None, 
                    tick = None,
+                   warn = False
                    ):
         """
         Add Initialize event to pool object.
@@ -100,7 +101,10 @@ class ConcentratedLiquidity():
         #check if tick is supplied, otherwise use the self calc. remove keep data, can not supply tick if dont want check
         if tick is not None:
             if self.sqrtPrice_to_tick(self.sqrtPrice) != tick:
-                raise TickPriceAllignmentError(f"Initialize: The price and tick supplied do not match\n\n\t{tick}, {self.sqrtPrice_to_tick(self.sqrtPrice)}")
+                if warn:
+                    TickPriceAllignmentError(f"Initialize: The price and tick supplied do not match\n\n\t{tick}, {self.sqrtPrice_to_tick(self.sqrtPrice)}")
+                else:
+                    raise TickPriceAllignmentError(f"Initialize: The price and tick supplied do not match\n\n\t{tick}, {self.sqrtPrice_to_tick(self.sqrtPrice)}")
             else:
                 self.tick = tick
         else:
@@ -980,7 +984,11 @@ class ConcentratedLiquidity():
             tdf = df.iloc[i]
 
             if tdf['event'] == 'Initialize':
-                self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'], 
+                if pass_error:
+                    self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'], 
+                            tick = tdf['args.tick'], warn = False)
+                else:
+                    self.Initialize(sqrtPriceX96 = tdf['args.sqrtPriceX96'], 
                             tick = tdf['args.tick'])
 
             if pass_error:
