@@ -982,7 +982,7 @@ class ConcentratedLiquidity():
             
         """
 
-        pos_dfs = []
+        position_df = pd.DataFrame()
         for i in range(len(df)):
             tdf = df.iloc[i]
 
@@ -1064,14 +1064,13 @@ class ConcentratedLiquidity():
                         tokenId = tdf['tokenId'])
             
             if not self.positions.empty:
-                pos_dfs.append(self.positions)
-
-        position_df = pd.concat(pos_dfs) #can save for different profit in state
-        position_df.drop_duplicates(subset=['last_L', 'start_L', 'tickLower', 'tickUpper', 'owner',
-                                            'start_token0_holdings', 'start_token1_holdings',
-                                            'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
-                                            'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 
-                                            'start_blockNumber', 'start_transactionIndex', 'start_transactionHash',], keep = 'first', inplace = True)
+                position_df = pd.concat([position_df, self.positions])
+                position_df.drop_duplicates(subset=['last_L', 'start_L', 'tickLower', 'tickUpper', 'owner',
+                                    'start_token0_holdings', 'start_token1_holdings',
+                                    'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
+                                    'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 
+                                    'start_blockNumber', 'start_transactionIndex', 'start_transactionHash',], keep = 'first', inplace = True)
+                
         return position_df
     
     def get_liquidity_distribution(self):
