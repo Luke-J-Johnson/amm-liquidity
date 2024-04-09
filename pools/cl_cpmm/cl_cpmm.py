@@ -1071,7 +1071,7 @@ class ConcentratedLiquidity():
                                             'start_token0_holdings', 'start_token1_holdings',
                                             'last_token0_holdings', 'last_token1_holdings', 'token0_fees_accrued',
                                             'token1_fees_accrued', 'token0_collected', 'token1_collected', 'start_logIndex', 
-                                            'start_blockNumber', 'start_transactionIndex', 'start_transactionHash',], keep = 'first', inplace = True)
+                                            'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 'tokenId'], keep = 'first', inplace = True)
         return position_df
     
     def get_liquidity_distribution(self):
