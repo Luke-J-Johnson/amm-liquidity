@@ -401,7 +401,13 @@ class ConcentratedLiquidity():
             amount1_a = amount1_nf
 
             fee0_collected = 0
+            counter = 0
             while amount0_a > 0:
+                counter += 1
+                if counter > 10000:
+                    warnings.warn(f"Swap skipped due to endless looping {amount0}, {amount1}")
+                    break
+
                 active_pos = pos.loc[(pos['tickLower'] < current_tick)&(pos['tickUpper'] >= current_tick)&(pos['last_L'] > 0)]
                 
                 if active_pos.empty:
@@ -455,7 +461,13 @@ class ConcentratedLiquidity():
             amount1_a = amount1_nf
 
             fee1_collected = 0
+            counter = 0
             while amount1_a > 0:
+                counter += 1
+                if counter > 10000:
+                    warnings.warn(f"Swap skipped due to endless looping {amount0}, {amount1}")
+                    break
+                
                 active_pos = pos.loc[(pos['tickLower'] <= current_tick)&(pos['tickUpper'] > current_tick)&(pos['last_L'] > 0)]
                 
                 if active_pos.empty:
