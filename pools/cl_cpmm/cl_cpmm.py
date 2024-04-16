@@ -246,9 +246,9 @@ class ConcentratedLiquidity():
         pos['last_token1_holdings'] = pos['last_token1_holdings'].mask(pos['tokenId'] == tokenId, amount1)
         pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
 
-        if not pos.loc[pos['last_L'] < 0].empty:
+        if not pos.loc[pos['last_L'] <= 4096*2].empty:
             warnings.warn(f"\nBurn event resulted in negative liquidity. Has been set to 0")
-            pos['last_L'] = pos['last_L'].mask(pos['last_L'] < 0, 0)
+            pos['last_L'] = pos['last_L'].mask(pos['last_L'] <= 4096*2, 0)
 
         self.positions = pos.copy()
         return 
@@ -418,6 +418,10 @@ class ConcentratedLiquidity():
 
                 L = active_pos['last_L'].sum()
                 
+                if L <= 0:
+                    warnings.warn(f"Amount 0 swap out of active liquidity, amount remaining {amount0_a}")
+                    break 
+                
                 #check if there is enough reserves in the tick
                 if self.get_amount0(sqrtPrice, sqrtPriceA, L) > amount0_a:
                     sqrtPrice_next = self.get_next_sqrtPrice_from_inputs(sqrtPrice, L, amount0_a, zeroForOne=zeroForOne)
@@ -484,6 +488,10 @@ class ConcentratedLiquidity():
                     continue
 
                 L = active_pos['last_L'].sum()
+
+                if L <= 0:
+                    warnings.warn(f"Amount 1 swap out of active liquidity, amount remaining {amount1_a}")
+                    break 
 
                 #check if there is enough reserves in the tick
                 if self.get_amount1(sqrtPrice, sqrtPriceB, L) > amount1_a:
