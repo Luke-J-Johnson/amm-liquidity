@@ -512,13 +512,17 @@ class ConcentratedLiquidity():
                 active_pos = pos.filter(((pl.col('last_L') > 0)&(pl.col('tickLower') < current_tick)&(pl.col('tickUpper') >= current_tick)))
                 
                 if active_pos.is_empty():
-                    if current_tick == pos.filter(pl.col('last_L') > 0)['tickLower'].min():
+                    if current_tick <= pos.filter(pl.col('last_L') > 0)['tickLower'].min():
                         active_pos = pos.filter((pl.col('tickLower') == current_tick)&(pl.col('last_L') > 0))
-                    elif current_tick < pos.filter(pl.col('last_L') > 0)['tickLower'].min(): 
-                        current_tick = pos.filter(pl.col('last_L') > 0)['tickLower'].min()
-                        current_tick_lower = current_tick - self.tickSpacing
-                        continue
-                    else:    
+                        print('e issue 0for1')
+                    # elif current_tick < pos.filter(pl.col('last_L') > 0)['tickLower'].min(): 
+                    #     print('lt issue 0for1')
+                    #     print(amount0_a)
+                    #     current_tick = pos.filter(pl.col('last_L') > 0)['tickLower'].min()
+                    #     current_tick_lower = current_tick - self.tickSpacing
+                    #     continue
+                    else:
+                        print('skip issue 0for1')    
                         current_tick = current_tick_lower
                         current_tick_lower = current_tick - self.tickSpacing
                         continue
@@ -579,27 +583,33 @@ class ConcentratedLiquidity():
                 active_pos = pos.filter(((pl.col('last_L') > 0)&(pl.col('tickLower') <= current_tick)&(pl.col('tickUpper') > current_tick)))
                 
                 if active_pos.is_empty():
-                    if current_tick == pos.filter(pl.col('last_L') > 0)['tickUpper'].max():
+                    if current_tick >= pos.filter(pl.col('last_L') > 0)['tickUpper'].max():
+                        print('e issue 1for0')
                         active_pos = pos.filter((pl.col('tickUpper') == current_tick)&(pl.col('last_L') > 0))
 
-                    elif current_tick > pos.filter(pl.col('last_L') > 0)['tickUpper'].max(): 
-                        current_tick = pos.filter(pl.col('last_L') > 0)['tickUpper'].max()
-                        current_tick_upper = current_tick + self.tickSpacing
-                        continue
-                    else:    
+                    # elif current_tick > pos.filter(pl.col('last_L') > 0)['tickUpper'].max(): 
+                    #     print('gt issue 1for0')
+                    #     print(amount1_a)
+                    #     current_tick = pos.filter(pl.col('last_L') > 0)['tickUpper'].max() #here looks interesting
+                    #     current_tick_upper = current_tick + self.tickSpacing
+                    #     continue
+
+                    else:
+                        print('skip issue 1for0')    
                         current_tick = current_tick_upper
                         current_tick_upper = current_tick + self.tickSpacing
                         continue
 
-                if active_pos.is_empty(): #if no liquidity, skip to next tick #current tick to next tick bound
-                    #check if there is any liquidity above
-                    if current_tick > pos.filter(pl.col('last_L') > 0)['tickUpper'].max():
-                        current_tick = pos.filter(pl.col('last_L') > 0)['tickUpper'].max()
-                    else:    
-                        current_tick = current_tick_upper
+                # if active_pos.is_empty(): #if no liquidity, skip to next tick #current tick to next tick bound
+                #     #check if there is any liquidity above 
+                #     #this code is interesting to say the least
+                #     if current_tick > pos.filter(pl.col('last_L') > 0)['tickUpper'].max():
+                #         current_tick = pos.filter(pl.col('last_L') > 0)['tickLower'].max()
+                #     else:    
+                #         current_tick = current_tick_upper
 
-                    current_tick_upper = current_tick + self.tickSpacing
-                    continue
+                #     current_tick_upper = current_tick + self.tickSpacing
+                #     continue
 
                 L = active_pos['last_L'].sum()
 
@@ -1130,6 +1140,7 @@ class ConcentratedLiquidity():
 
         pos_dfs = []
         for i in range(len(df)):
+            print(i)
             tdf = df[i]
 
             if tdf['event'][0] == 'Initialize':
