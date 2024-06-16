@@ -59,6 +59,7 @@ class ConcentratedLiquidity():
         self.sqrtPrice = None 
         self.sqrtPriceX96 = None
         self.tick = None
+        self.save_events = False
 
 
     
@@ -147,11 +148,10 @@ class ConcentratedLiquidity():
             The tokenId of the increaseLiquidity event emited by the nft manager
         """
 
-        
-        mint_df = pd.DataFrame([['Mint', logIndex, blockNumber, transactionIndex, transactionHash, sender, amount, tickLower, tickUpper, amount0, amount1, tokenId]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
-        
-        self.mints = pd.concat([self.mints, mint_df])
+        if self.save_events:
+            mint_df = pd.DataFrame([['Mint', logIndex, blockNumber, transactionIndex, transactionHash, sender, amount, tickLower, tickUpper, amount0, amount1, tokenId]], 
+                        columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
+            self.mints = pd.concat([self.mints, mint_df])
 
         pos = self.positions      
 
@@ -228,11 +228,11 @@ class ConcentratedLiquidity():
         tokenId  :   int
             The tokenId of the decreaseLiquidity event emited by the nft manager
         """
-
-        burn_df = pd.DataFrame([['Burn', logIndex, blockNumber, transactionIndex, transactionHash, owner, amount, tickLower, tickUpper, amount0, amount1, tokenId]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
-        
-        self.burns = pd.concat([self.burns, burn_df])
+        if self.save_events:
+            burn_df = pd.DataFrame([['Burn', logIndex, blockNumber, transactionIndex, transactionHash, owner, amount, tickLower, tickUpper, amount0, amount1, tokenId]], 
+                        columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'amount', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
+            
+            self.burns = pd.concat([self.burns, burn_df])
         
         pos = self.positions
 
@@ -247,7 +247,7 @@ class ConcentratedLiquidity():
         pos = self.position_last_update_state(pos, blockNumber, transactionIndex, logIndex, transactionHash)
 
         if not pos.loc[pos['last_L'] <= 4096*2].empty:
-            warnings.warn(f"\nBurn event resulted in negative liquidity. Has been set to 0")
+            warnings.warn(f"\nBurn event resulted in negative liquidity. Has been set to 0 from {pos['last_L'].loc[pos['last_L'] <= 4096*2].max()}")
             pos['last_L'] = pos['last_L'].mask(pos['last_L'] <= 4096*2, 0)
 
         self.positions = pos.copy()
@@ -288,9 +288,10 @@ class ConcentratedLiquidity():
             The tokenId of the collect event emited by the nft manager
         """
 
-        collect_df = pd.DataFrame([['Collect', logIndex, blockNumber, transactionIndex, transactionHash, recipient, tickLower, tickUpper, amount0, amount1, tokenId]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
-        self.collects = pd.concat([self.collects, collect_df])
+        if self.save_events:
+            collect_df = pd.DataFrame([['Collect', logIndex, blockNumber, transactionIndex, transactionHash, recipient, tickLower, tickUpper, amount0, amount1, tokenId]], 
+                        columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'tickLower', 'tickUpper', 'amount0', 'amount1', 'tokenId'])
+            self.collects = pd.concat([self.collects, collect_df])
 
         pos = self.positions
 
@@ -347,10 +348,11 @@ class ConcentratedLiquidity():
             Set to True to remove any raise of the errors/warnings
         """
 
-        swap_df = pd.DataFrame([['Swap', logIndex, blockNumber, transactionIndex, transactionHash, sender, recipient, amount0, amount1, sqrtPriceX96, tick, liquidity]], 
-                       columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'recipient', 'amount0', 'amount1', 'sqrtPriceX96', 'tick', 'liquidity'])
-        
-        self.swaps = pd.concat([self.swaps, swap_df])
+        if self.save_events:
+            swap_df = pd.DataFrame([['Swap', logIndex, blockNumber, transactionIndex, transactionHash, sender, recipient, amount0, amount1, sqrtPriceX96, tick, liquidity]], 
+                        columns=['event', 'logIndex', 'blockNumber', 'transactionIndex', 'transactionHash', 'sender', 'recipient', 'amount0', 'amount1', 'sqrtPriceX96', 'tick', 'liquidity'])
+            
+            self.swaps = pd.concat([self.swaps, swap_df])
 
         #Fees for pool 
         zeroForOne = None
@@ -405,12 +407,8 @@ class ConcentratedLiquidity():
                 active_pos = pos.loc[(pos['tickLower'] < current_tick)&(pos['tickUpper'] >= current_tick)&(pos['last_L'] > 0)]
                 
                 if active_pos.empty:
-                    if current_tick == pos['tickLower'].loc[(pos['last_L'] > 0)].min():
+                    if current_tick <= pos['tickLower'].loc[(pos['last_L'] > 0)].min():
                         active_pos = pos.loc[(pos['tickLower'] == current_tick)&(pos['last_L'] > 0)]
-                    elif current_tick < pos['tickLower'].loc[(pos['last_L'] > 0)].min(): 
-                        current_tick = pos['tickLower'].loc[(pos['last_L'] > 0)].min()
-                        current_tick_lower = current_tick - self.tickSpacing
-                        continue
                     else:    
                         current_tick = current_tick_lower
                         current_tick_lower = current_tick - self.tickSpacing
@@ -463,14 +461,8 @@ class ConcentratedLiquidity():
                 active_pos = pos.loc[(pos['tickLower'] <= current_tick)&(pos['tickUpper'] > current_tick)&(pos['last_L'] > 0)]
                 
                 if active_pos.empty:
-                    if current_tick == pos['tickUpper'].loc[(pos['last_L'] > 0)].max():
+                    if current_tick >= pos['tickUpper'].loc[(pos['last_L'] > 0)].max():
                         active_pos = pos.loc[(pos['tickUpper'] == current_tick)&(pos['last_L'] > 0)]
-
-                    elif current_tick > pos['tickUpper'].loc[(pos['last_L'] > 0)].max(): 
-                        current_tick = pos['tickUpper'].loc[(pos['last_L'] > 0)].max()
-                        current_tick_upper = current_tick + self.tickSpacing
-                        continue
-
                     else:    
                         current_tick = current_tick_upper
                         current_tick_upper = current_tick + self.tickSpacing
@@ -1082,6 +1074,17 @@ class ConcentratedLiquidity():
                                             'start_blockNumber', 'start_transactionIndex', 'start_transactionHash', 'tokenId'], keep = 'first', inplace = True)
         return position_df
     
+
+    def set_current_sqrtPriceX96(self, sqrtPriceX96):
+        self.sqrtPrice = self.sqrtPriceX96_to_sqrtPrice(sqrtPriceX96)
+        self.tick = self.sqrtPrice_to_tick(self.sqrtPrice)
+
+    def set_liquidity_positions_from_replay(self, positions):
+        positions.sort_values(['tokenId', 'last_blockNumber', 'last_logIndex'], inplace=True)
+        pos = positions.groupby('tokenId').last().reset_index()
+        self.positions = pos
+        self.liquidity = pos['last_L'].loc[(pos['tickLower'] < self.tick)&(pos['tickUpper'] >= self.tick)&(pos['last_L'] > 0)].sum()
+
     def get_liquidity_distribution(self):
         pass
 
